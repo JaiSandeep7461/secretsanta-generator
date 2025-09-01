@@ -1,0 +1,143 @@
+
+
+trigger:
+- none
+
+pool:
+  name: Sandy
+  demands: agent.name -equals VM-AGENT
+
+stages:
+- stage: Compile
+  displayName: 'Compile Stage'
+  jobs:
+  - job: BuildJob
+    displayName: 'Build Job'
+    pool:
+      name: Sandy
+      demands: agent.name -equals VM-AGENT
+    steps:
+    - script: mvn compile
+      displayName: 'Compile-Step'
+
+- stage: Test
+  displayName: 'Test Stage'
+  jobs:
+  - job: TestJob
+    displayName: 'Test Job'
+    pool:
+      name: Sandy
+      demands: agent.name -equals VM-AGENT
+    steps:
+    - script: mvn test
+      displayName:  'Test-Step'
+
+- stage: Trivy_FS_Scan
+  displayName:  'Trivy FS Stage'
+  jobs:
+  - job: TrivyFSJob
+    displayName: 'TrivyFS Job'
+    pool:
+      name: Sandy
+      demands: agent.name -equals VM-AGENT
+    steps:
+    - script: trivy fs --format table -o trivy-fs-report.html .
+      displayName: 'TrivyFS-Scan-Step'
+
+- stage: SonarQube_Scan
+  displayName: 'SonarQube Stage'
+  jobs:
+  - job: SonarQubeJob
+    displayName: 'SonarQube Job'
+    pool:
+      name: Sandy
+      demands: agent.name -equals VM-AGENT
+    steps:
+    - task: SonarQubePrepare@7
+      inputs:
+        SonarQube: 'sonar-svc'
+        scannerMode: 'cli'
+        configMode: 'manual'
+        cliProjectKey: 'screte-santa'
+        cliProjectName: 'screte-santa'
+        cliSources: '.'
+        extraProperties: |
+          # Additional properties that will be passed to the scanner, 
+          # Put one key=value per line, example:
+          # sonar.exclusions=**/*.bin
+          sonar.java.binaries=.
+    - task: SonarQubeAnalyze@7
+      inputs:
+        jdkversion: 'JAVA_HOME'
+
+- stage: Build
+  displayName: 'Build Stage'
+  jobs:
+  - job: BuildJob
+    displayName: 'Build Job'
+    pool:
+      name: Sandy
+      demands: agent.name -equals VM-AGENT
+    steps:
+      - script: mvn package
+        displayName: 'Build-Package-Step'
+
+- stage: Docker
+  displayName: 'Docker Stage'
+  jobs:
+  - job: DockerJob
+    displayName: 'Docker Job'
+    pool:
+     name: Sandy
+     demands: agent.name -equals VM-AGENT
+    steps:
+    - script: mvn package
+      displayName: 'Build-Package-Step'
+    - task: Docker@2
+      inputs:
+        containerRegistry: 'docker-svc'
+        repository: 'sandy7461/santa'
+        command: 'buildAndPush'
+        Dockerfile: '**/Dockerfile'
+        tags: 'latest'
+
+- stage: Trivy_Image_Scan
+  displayName:  'Trivy Image Stage'
+  jobs:
+  - job: TrivyImageJob
+    displayName: 'Trivy Image Job'
+    pool:
+      name: Sandy
+      demands: agent.name -equals VM-AGENT
+    steps:
+    - script: trivy image --format table -o trivy-fs-report.html sandy7461/santa:latest
+      displayName: 'Trivy-Image-Scan-Step'
+
+- stage: K8_deploy
+  displayName: 'k8_Deploy Stage'
+  jobs:
+  - job: TK8_DeployJob
+    displayName: 'k8_Deploy Job'
+    pool:
+      name: Sandy
+      demands: agent.name -equals VM-AGENT
+    steps:
+    - task: KubectlInstaller@0
+      inputs:
+        kubectlVersion: 'latest'
+    - task: Kubernetes@1
+      inputs:
+        connectionType: 'Kubernetes Service Connection'
+        kubernetesServiceEndpoint: 'k8-service-connection'
+        namespace: 'default'
+        command: 'apply'
+        useConfigurationFile: true
+        configuration: 'deployment-service.yaml'
+        secretType: 'dockerRegistry'
+        containerRegistryType: 'Container Registry'
+        dockerRegistryEndpoint: 'docker-svc'
+        forceUpdate: false
+
+
+
+
